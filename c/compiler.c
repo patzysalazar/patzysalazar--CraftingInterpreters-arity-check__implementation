@@ -1440,7 +1440,7 @@ static void returnStatement() {
   if (current->type == TYPE_SCRIPT) {
     error("Can't return from top-level code.");
   }
-
+//consume(TOKEN_RIGHT_BRACE, "Expect '}' after the switch cases."); // [paren]
 //< return-from-script
   if (match(TOKEN_SEMICOLON)) {
     emitReturn();
@@ -1456,6 +1456,89 @@ static void returnStatement() {
     emitByte(OP_RETURN);
   }
 }
+
+
+static void switchStatement() {
+
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'.");// consuming parenthesis, {, and :
+
+  beginScope();// makes new local scope for switch
+  expression();// compiles expression inside the parenthesis
+  Token SwitchVariable = syntheticToken("$switch");//new temp token name
+  addLocal(SwitchVariable);//add temp token to local var list
+  defineVariable(0);//temp switch var initialized
+
+
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after switch expression input."); // [paren]
+  consume(TOKEN_LEFT_BRACE, "Expect '{' before the switch cases."); // [paren]
+
+  int stateOfCases = 0;
+  int caseEndJump[256];
+  int caseCount =0;
+  int noMatchCases = -1;
+
+  while(match(TOKEN_CASE) || match(TOKEN_DEFAULT)){// deals with case or default
+    if(stateOfCases == 2){// default processed
+        error("cant have another case or double default");
+
+    }
+
+    else if(stateOfCases == 1 ){// if previous case processed
+        if(caseCount < 256){// still space in array
+        caseEndJump[caseCount++] = emitJump(OP_JUMP);// jumps and saves location in array so program exits switch after match case
+        }
+        else{
+            error("Too many switch cases");
+        }
+
+    patchJump(noMatchCases);
+    emitByte(OP_POP);
+      }
+
+
+    if(parser.previous.type == TOKEN_CASE){//case
+        stateOfCases = 1;
+
+
+        namedVariable(SwitchVariable, false);// gets switch val
+        expression();// compiles recent case
+        emitByte(OP_EQUAL);// makes comparison to switch
+
+        noMatchCases = emitJump(OP_JUMP_IF_FALSE);// if false case go to next case
+        emitByte(OP_POP);// removes true result/val from stack
+
+        consume(TOKEN_COLON, "Expect ':' after cases.");
+
+    }
+    else if(parser.previous.type == TOKEN_DEFAULT){//default
+        stateOfCases = 2;
+        consume(TOKEN_COLON, "Expect ':' after cases.");
+
+
+        }
+    while(!check(TOKEN_CASE) && !check(TOKEN_DEFAULT) && !check(TOKEN_EOF) && !check(TOKEN_RIGHT_BRACE)){// processes statements inside cases
+    statement();
+    }
+
+  }
+    if(stateOfCases == 1){// if comparison false in last case
+            patchJump(noMatchCases);
+            emitByte(OP_POP);
+
+  }
+  for(int savedJumps = 0; savedJumps <caseCount; savedJumps++ ){
+  patchJump(caseEndJump[savedJumps]);
+
+  }
+  consume(TOKEN_RIGHT_BRACE, "Expect '}' after the switch cases."); // [paren]
+
+  endScope();//ends switch scope
+}
+
+
+
+
+
 //< Calls and Functions return-statement
 //> Jumping Back and Forth while-statement
 static void whileStatement() {
@@ -1565,7 +1648,13 @@ static void statement() {
     endScope();
 //< Local Variables parse-block
 //> parse-expressions-statement
-  } else {
+  }
+  else if(match(TOKEN_SWITCH)){
+    switchStatement();
+
+  }
+
+  else {
     expressionStatement();
 //< parse-expressions-statement
   }
