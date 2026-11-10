@@ -1,0 +1,7 @@
+var start = clock();
+for(var i = 0; i <= 10000; i = i + 1){
+    print "Hello World!";
+}
+var end = clock();
+print "done!";
+print end - start;

@@ -76,7 +76,7 @@ static void runtimeError(const char* format, ...) {
 //< Closures runtime-error-function
     size_t instruction = frame->ip - function->chunk.code - 1;
     fprintf(stderr, "[line %d] in ", // [minus]
-            function->chunk.lines[instruction]);
+            getLine(&function->chunk, (int)instruction));
     if (function->name == NULL) {
       fprintf(stderr, "script\n");
     } else {
@@ -460,11 +460,15 @@ static void concatenate() {
 static InterpretResult run() {
 //> Calls and Functions run
   CallFrame* frame = &vm.frames[vm.frameCount - 1];
+  register uint8_t* ip = frame->ip;// local ip variable
 
 /* A Virtual Machine run < Calls and Functions run
 #define READ_BYTE() (*vm.ip++)
 */
-#define READ_BYTE() (*frame->ip++)
+//#define READ_BYTE() (*frame->ip++)
+
+#define READ_BYTE() (*ip++)//change bc local var
+
 /* A Virtual Machine read-constant < Calls and Functions run
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
 */
@@ -474,8 +478,8 @@ static InterpretResult run() {
     (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
 */
 #define READ_SHORT() \
-    (frame->ip += 2, \
-    (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+    (ip += 2, \
+    (uint16_t)((ip[-2] << 8) | ip[-1]))
 
 /* Calls and Functions run < Closures read-constant
 #define READ_CONSTANT() \
@@ -502,6 +506,7 @@ static InterpretResult run() {
 #define BINARY_OP(valueType, op) \
     do { \
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
+        frame->ip = ip; /*saves position even before binary op error*/\
         runtimeError("Operands must be numbers."); \
         return INTERPRET_RUNTIME_ERROR; \
       } \
@@ -533,7 +538,7 @@ static InterpretResult run() {
 */
 //> Closures disassemble-instruction
     disassembleInstruction(&frame->closure->function->chunk,
-        (int)(frame->ip - frame->closure->function->chunk.code));
+        (int)(ip - frame->closure->function->chunk.code));
 //< Closures disassemble-instruction
 #endif
 
@@ -616,6 +621,7 @@ static InterpretResult run() {
         ObjString* name = READ_STRING();
         Value value;
         if (!tableGet(&vm.globals, OBJ_VAL(name), &value)) {
+          frame->ip = ip;// save the current pointer position when error;
           runtimeError("Undefined variable '%s'.", name->Chars);
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -636,6 +642,7 @@ static InterpretResult run() {
         ObjString* name = READ_STRING();
         if (tableSet(&vm.globals, OBJ_VAL(name), peek(0))) {
           tableDelete(&vm.globals, OBJ_VAL(name)); // [delete]
+          frame->ip = ip;
           runtimeError("Undefined variable '%s'.", name->Chars);
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -660,6 +667,7 @@ static InterpretResult run() {
       case OP_GET_PROPERTY: {
 //> get-not-instance
         if (!IS_INSTANCE(peek(0))) {
+            frame->ip = ip;//save position when error
           runtimeError("Only instances have properties.");
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -682,6 +690,7 @@ static InterpretResult run() {
         return INTERPRET_RUNTIME_ERROR;
 */
 //> Methods and Initializers get-method
+        frame->ip = ip;// for error
         if (!bindMethod(instance->klass, name)) {
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -693,6 +702,7 @@ static InterpretResult run() {
       case OP_SET_PROPERTY: {
 //> set-not-instance
         if (!IS_INSTANCE(peek(1))) {
+          frame-> ip = ip;// if not instance report error, so save position for error
           runtimeError("Only instances have fields.");
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -710,6 +720,8 @@ static InterpretResult run() {
       case OP_GET_SUPER: {
         ObjString* name = READ_STRING();
         ObjClass* superclass = AS_CLASS(pop());
+
+        frame->ip = ip; //position saved before knowing if superclass method does not exist and has error.
         
         if (!bindMethod(superclass, name)) {
           return INTERPRET_RUNTIME_ERROR;
@@ -750,8 +762,8 @@ static InterpretResult run() {
           double a = AS_NUMBER(pop());
           push(NUMBER_VAL(a + b));
         } else {
-          runtimeError(
-              "Operands must be two numbers or two strings.");
+          frame->ip = ip;// saves position before add error
+          runtimeError("Operands must be two numbers or two strings.");
           return INTERPRET_RUNTIME_ERROR;
         }
         break;
@@ -770,6 +782,7 @@ static InterpretResult run() {
 //> Types of Values op-negate
       case OP_NEGATE:
         if (!IS_NUMBER(peek(0))) {
+          frame->ip = ip;// saves position even if negation error
           runtimeError("Operand must be a number.");
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -793,7 +806,7 @@ static InterpretResult run() {
         vm.ip += offset;
 */
 //> Calls and Functions jump
-        frame->ip += offset;
+        ip += offset;
 //< Calls and Functions jump
         break;
       }
@@ -805,7 +818,7 @@ static InterpretResult run() {
         if (isFalsey(peek(0))) vm.ip += offset;
 */
 //> Calls and Functions jump-if-false
-        if (isFalsey(peek(0))) frame->ip += offset;
+        if (isFalsey(peek(0))) ip += offset;
 //< Calls and Functions jump-if-false
         break;
       }
@@ -817,7 +830,7 @@ static InterpretResult run() {
         vm.ip -= offset;
 */
 //> Calls and Functions loop
-        frame->ip -= offset;
+        ip -= offset;
 //< Calls and Functions loop
         break;
       }
@@ -825,11 +838,14 @@ static InterpretResult run() {
 //> Calls and Functions interpret-call
       case OP_CALL: {
         int argCount = READ_BYTE();
+        //ip used to tell interpreter which code to execute next
+        frame->ip = ip;// save recent original pointer position of fcn before execution to then resume next code
         if (!callValue(peek(argCount), argCount)) {
           return INTERPRET_RUNTIME_ERROR;
         }
 //> update-frame-after-call
         frame = &vm.frames[vm.frameCount - 1];
+        ip = frame->ip; //gets recent pointer position before execution from called fcn to then execute the code inside that fcn
 //< update-frame-after-call
         break;
       }
@@ -838,10 +854,12 @@ static InterpretResult run() {
       case OP_INVOKE: {
         ObjString* method = READ_STRING();
         int argCount = READ_BYTE();
+        frame->ip = ip;//same thing
         if (!invoke(method, argCount)) {
           return INTERPRET_RUNTIME_ERROR;
         }
         frame = &vm.frames[vm.frameCount - 1];
+        ip = frame->ip;// same thing
         break;
       }
 //< Methods and Initializers interpret-invoke
@@ -850,10 +868,13 @@ static InterpretResult run() {
         ObjString* method = READ_STRING();
         int argCount = READ_BYTE();
         ObjClass* superclass = AS_CLASS(pop());
+
+        frame->ip = ip; // same thing but for super class method
         if (!invokeFromClass(superclass, method, argCount)) {
           return INTERPRET_RUNTIME_ERROR;
         }
         frame = &vm.frames[vm.frameCount - 1];
+        ip = frame->ip;// same thing but for super class method
         break;
       }
 //< Superclasses interpret-super-invoke
@@ -909,6 +930,7 @@ static InterpretResult run() {
         vm.stackTop = (int)(frame->slots - vm.stack);
         push(result);
         frame = &vm.frames[vm.frameCount - 1];
+        ip = frame -> ip; // get saved position from og fcn after called fcn execution to then execute next code
         break;
 //< Calls and Functions interpret-return
       }
@@ -922,6 +944,7 @@ static InterpretResult run() {
         Value superclass = peek(1);
 //> inherit-non-class
         if (!IS_CLASS(superclass)) {
+          frame->ip = ip;//save position even before inherit error
           runtimeError("Superclass must be a class.");
           return INTERPRET_RUNTIME_ERROR;
         }

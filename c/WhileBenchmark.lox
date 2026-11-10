@@ -1,0 +1,12 @@
+var start = clock();
+var i = 0;
+while (i <= 10000){
+    i = i + 1;
+    print i;
+}
+var end = clock();
+print "done!";
+print end - start;
+
+
+
