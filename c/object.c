@@ -97,9 +97,10 @@ ObjInstance* newInstance(ObjClass* klass) {
 }
 //< Classes and Instances new-instance
 //> Calls and Functions new-native
-ObjNative* newNative(NativeFn function) {
+ObjNative* newNative(NativeFn function, int arityCheck) {
   ObjNative* native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
   native->function = function;
+  native->arity= arityCheck;// saves expected number of arguments
   return native;
 }
 //< Calls and Functions new-native

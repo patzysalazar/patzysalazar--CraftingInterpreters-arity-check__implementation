@@ -116,6 +116,7 @@ typedef Value (*NativeFn)(int argCount, Value* args);
 typedef struct {
   Obj obj;
   NativeFn function;
+  int arity;// # of args expected - arity checking for native fcn
 } ObjNative;
 //< Calls and Functions obj-native
 //> obj-string
@@ -198,7 +199,7 @@ ObjFunction* newFunction();
 ObjInstance* newInstance(ObjClass* klass);
 //< Classes and Instances new-instance-h
 //> Calls and Functions new-native-h
-ObjNative* newNative(NativeFn function);
+ObjNative* newNative(NativeFn function, int arity);
 //< Calls and Functions new-native-h
 //> take-string-h
 //ObjString* takeString(char* chars, int length);

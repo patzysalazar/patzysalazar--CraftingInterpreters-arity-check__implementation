@@ -89,9 +89,9 @@ static void runtimeError(const char* format, ...) {
 }
 //< Types of Values runtime-error
 //> Calls and Functions define-native
-static void defineNative(const char* name, NativeFn function) {
+static void defineNative(const char* name, NativeFn function, int arityCheck) {
   push(OBJ_VAL(copyString(name, (int)strlen(name))));
-  push(OBJ_VAL(newNative(function)));
+  push(OBJ_VAL(newNative(function, arityCheck)));
   tableSet(&vm.globals, OBJ_VAL(AS_STRING(vm.stack[0])), vm.stack[1]);
   pop();
   pop();
@@ -133,7 +133,7 @@ vm.stackCap = 0;
 //< Methods and Initializers init-init-string
 //> Calls and Functions define-native-clock
 
-  defineNative("clock", clockNative);
+  defineNative("clock", clockNative, 0);// now only accepts 0 arguments, before no check
 //< Calls and Functions define-native-clock
 }
 
@@ -308,10 +308,21 @@ static bool callValue(Value callee, int argCount) {
 //> call-native
       case OBJ_NATIVE: {
         NativeFn native = AS_NATIVE(callee);
-        Value result = native(argCount,vm.stack + vm.stackTop - argCount);
-        vm.stackTop -= argCount + 1;
-        push(result);
-        return true;
+        int fcncalledFromVM = -argCount - 1;// native fcn offset location
+        int nativeObject = ((ObjNative*)AS_OBJ(vm.stack[vm.stackTop + fcncalledFromVM]))->arity;// expected number of args
+        if(nativeObject == argCount){// if number of args passed and the number of args expected are the same execute native fcn
+            Value result = native(argCount, (vm.stack + vm.stackTop) - argCount);// execution of native fcn
+            //- using first arg position passed by native fcn
+            vm.stackTop -= argCount + 1;//removes fcn and args
+            push(result);// pushed to stack
+            return true;
+
+        }
+        else{//else error if args expected and args passed are not the same
+            runtimeError("clox received %d number of arguments, clox expects %d number of arguments",argCount, nativeObject);
+            return false;
+
+        }
       }
 //< call-native
       default:
